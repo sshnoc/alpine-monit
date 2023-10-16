@@ -35,7 +35,7 @@ RUN apk update && apk upgrade && \
     mkdir -p /var/run/monit/events && \
     rm -rf /var/cache/apk/*
 
-COPY ./etc/monit.d/*.conf /etc/monit.d/
+# COPY ./etc/monit.d/*.conf /etc/monit.d/
 COPY ./etc/rsyslog.conf /etc/rsyslog.conf
 
 VOLUME [ "/var/run/monit" ]

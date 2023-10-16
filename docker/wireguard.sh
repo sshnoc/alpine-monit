@@ -5,10 +5,17 @@ source /common.sh
 
 # Wireguard
 # https://wiki.alpinelinux.org/wiki/Configure_a_Wireguard_interface_(wg)
-WG0_CONFIG=/etc/wireguard/wg0.conf
-WG0_PING_PERIOD=10000 # ms
-WG0_INTERFACE=wg0
+
+WG_DISABLED=${WG_DISABLED:-"yes"}
+WG0_INTERFACE=${WG0_INTERFACE:-"wg0"}
+
+WG0_CONFIG=/etc/wireguard/${WG0_INTERFACE}.conf
+WG0_PING_PERIOD=${WG0_PING_PERIOD:-10000}
 RESTART_LOCK=""
+
+# Return status
+STATUS_WG_TIMEOUT=5
+STATUS_WG_DISABLED=3
 
 function is_ifup() {
   ip a show $WG0_INTERFACE up &> /dev/null
@@ -61,12 +68,11 @@ function main() {
   local action=${1:---start}
   local exit_status=0
 
-  if [ -n "$WG_DISABLED" ] && [ "$WG_DISABLED" == "yes"  ] ; then
-    _info "Wireguard is disabled"
-    exit 3
+  if [ "$WG_DISABLED" == "yes"  ] ; then
+    exit $STATUS_WG_DISABLED
   fi
 
-  if [ -n "$RESTART_LOCK" ] && [ -r "$RESTART_LOCK" ] ; then
+  if [ -r "$RESTART_LOCK" ] ; then
     _info "(${_func}) Wireguard is restarting"
     return 0
   fi
@@ -91,7 +97,7 @@ function main() {
   if [ "${action}" == "--check" ] ; then
     wg show $WG0_INTERFACE 2> /dev/null | grep 'latest handshake' &> /dev/null
     if [ $? -gt 0 ] ; then
-      exit 5
+      exit $STATUS_WG_TIMEOUT
     fi
   fi
 

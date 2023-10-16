@@ -1,2 +1,5 @@
 runtime
 test_image.sh
+ARCHIVE
+DEVEL.md
+docker/prerun.sh

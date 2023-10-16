@@ -3,23 +3,40 @@
 LOG_PREFIX=init.sh
 source /common.sh
 
-function prerun() {
-  if [ -r /prerun.sh ] ; then
-    source /prerun.sh
-  else
-    _info "Prerun script not found"
-  fi
-}
+# Defaults
+MONIT_ADMIN_PASSWORD=${MONIT_ADMIN_PASSWORD:-admin}
+WG_DISABLED=${WG_DISABLED:-"yes"}
+WG0_INTERFACE=${WG0_INTERFACE:-"wg0"}
+WG0_KEEPALIVE=${WG0_KEEPALIVE:-25}
 
-function set_monit_alert() {
-  local alert_conf=/etc/monit.d/alert.conf
+function set_monit_local() {
+  local local_conf=/etc/monit.d/local.conf
 
-  if [ -r $alert_conf ] ; then
-    rm $alert_conf
+  if [ -r $local_conf ] ; then
+    rm $local_conf
   fi
+
+  cat <<EOF > $local_conf
+set daemon 30
+set log syslog
+
+set pidfile /var/run/monit/monit.pid
+set idfile /var/run/monit/monit.id
+set statefile /var/run/monit/monit.state
+
+set httpd port 2812 and
+    allow admin:$MONIT_ADMIN_PASSWORD
+
+check system \$HOST
+  if loadavg (1min) per core > 2 for 5 cycles then alert
+  if loadavg (5min) per core > 1.5 for 10 cycles then alert
+  if cpu usage > 95% for 10 cycles then alert
+  if memory usage > 75% then alert
+  if swap usage > 25% then alert
+EOF
 
   if [ -n "$MONIT_MAILSERVER" ] && [ -n "$MONIT_OWNER" ] ; then
-    cat <<EOF > $alert_conf
+    cat <<EOF >> $local_conf
 SET MAILSERVER $MONIT_MAILSERVER
 
 set eventqueue
@@ -41,10 +58,11 @@ set mail-format {
 
 set alert $MONIT_OWNER
 EOF
-    _info "Monit $alert_conf created"
+    _info "Monit e-amil alert config $local_conf created"
   else
-    _warn "Monit E-mail alert is not set and disabled"
+    _warn "Monit e-mail alert is not set and disabled"
   fi
+  _info "Monit local config created"
 }
 
 set_monit_wireguard() {
@@ -54,30 +72,37 @@ set_monit_wireguard() {
     rm $wireguard_conf
   fi
 
-  if [ -n "$WG_DISABLED" ] && [ "$WG_DISABLED" == "yes"  ] ; then
-    # _info "Wireguard is disabled"
+  if [ "$WG_DISABLED" == "yes"  ] ; then
+    _warn "Wireguard is disabled"
     return
   fi
 
   if [ -z "$WG0_ENDPOINT" ] ; then
-    _warn "Set WG0_ENDPOINT environment variable"
+    _warn "Set WG0_ENDPOINT environment variable! Wireguard is disabled."
     return
   fi
 
   if [ -z "$WG0_ENDPOINT_PORT" ] ; then
-    _warn "Set WG0_ENDPOINT_PORT environment variable"
+    _warn "Set WG0_ENDPOINT_PORT environment variable! Wireguard is disabled."
+    return
+  fi
+
+  if [ -z "$WG0_INTERFACE" ] ; then
+    _warn "Set WG0_INTERFACE environment variable! Wireguard is disabled."
     return
   fi
 
   cat <<EOF > $wireguard_conf
+# STATUS_WG_TIMEOUT=5
+# STATUS_WG_DISABLED=3
+
 check program wireguard with path "/wireguard.sh --check"
   with timeout 10 seconds
   if status = 5 then exec "/wireguard.sh --restart"
   if status = 3 then unmonitor
   if status = 1 then unmonitor
 
-# TODO
-check network wg0 with interface wg0
+check network $WG0_INTERFACE with interface $WG0_INTERFACE
   depends wireguard
   if link down then alert
 
@@ -104,20 +129,58 @@ check host wg_gateway with address $WG0_GATEWAY
 EOF
   fi
 
-  _info "Monit $wireguard_conf created"
+  _info "Monit Wireguard config created"
 }
 
-function set_wg0() {
-  local wg0_conf=/etc/wireguard/wg0.conf
+function set_monit_pinger() {
+  local pinger_conf=/etc/monit.d/pinger.conf
+
+  if [ -r $pinger_conf ] ; then
+    rm $pinger_conf
+  fi
+
+  if [ -n "$PINGER_ADDRESS" ] ; then
+    cat <<EOF >> $pinger_conf
+check host pinger with address $PINGER_ADDRESS
+  if failed ping count 1 then alert
+EOF
+    _info "Monit Pinger config created"
+  else
+    _warn "Pinger is disabled"
+  fi
+}
+
+function set_monit_rsyslog() {
+  local rsyslog_conf=/etc/monit.d/rsyslog.conf
+
+  if [ -r $rsyslog_conf ] ; then
+    rm $rsyslog_conf
+  fi
+
+  cat <<EOF >> $rsyslog_conf
+check file rsyslogd_mark with path /var/log/messages
+  if timestamp > 65 minutes then alert
+EOF
+
+  _info "Monit rsyslog config created"
+}
+
+function set_wireguard_wg0() {
+  if [ -n "$WG_DISABLED" ] && [ "$WG_DISABLED" == "yes"  ] ; then
+    # _info "Wireguard is disabled"
+    return
+  fi
+
+  if [ -z "$WG0_INTERFACE" ] ; then
+    _error "Set WG0_INTERFACE environment variable"
+    return
+  fi
+
+  local wg0_conf=/etc/wireguard/${WG0_INTERFACE}.conf
 
   if [ -r $wg0_conf ] ; then
     # rm $wg0_conf
     _warn "Wireguard config $wg0_conf found. Environment variables not used."
-    return
-  fi
-
-  if [ -n "$WG_DISABLED" ] && [ "$WG_DISABLED" == "yes"  ] ; then
-    # _info "Wireguard is disabled"
     return
   fi
 
@@ -156,11 +219,11 @@ PublicKey = $WG0_PUBLICKEY
 PresharedKey = $WG0_PSK
 Endpoint = $WG0_ENDPOINT:$WG0_ENDPOINT_PORT
 AllowedIPs = $WG0_ALLOWEDIPS
-PersistentKeepalive = 25
+PersistentKeepalive = $WG0_KEEPALIVE
 EOF
 
   chmod 600 $wg0_conf
-  _info "Wireguard config $wg0_conf created"
+  _info "Wireguard config created"
 }
 
 function exec_monit() {
@@ -171,12 +234,12 @@ function start_monit() {
   /usr/bin/monit
 }
 
-function exec_syslog() {
-  exec /sbin/syslogd -n -L -D -O -
-}
+# function exec_syslog() {
+#   exec /sbin/syslogd -n -L -D -O -
+#   /sbin/syslogd -L -b 0 -D
+# }
 
-function start_syslog() {
-  # /sbin/syslogd -L -b 0 -D
+function start_rsyslog() {
   /usr/sbin/rsyslogd
 }
 
@@ -185,17 +248,22 @@ function start_wireguard() {
 }
 
 function main() {
-  start_syslog
-  set_monit_alert
-  set_monit_wireguard
-  set_wg0
   prerun
-  # exec_monit
+
+  show_logo "Image: $IMAGE_NAME\nGit Revision: $GIT_REV\nBuild Date: $BUILD_DATE\n"
+
+  start_rsyslog
+
+  set_monit_local
+  set_monit_wireguard
+  set_monit_pinger
+  # set_monit_rsyslog
+
+  set_wireguard_wg0
   start_wireguard
-  sleep 1
-  start_monit
-  sleep 1
-  exec /usr/bin/tail -f -n +1 /var/log/messages
+
+  # start_monit
+  exec_monit
 }
 
 main $*
