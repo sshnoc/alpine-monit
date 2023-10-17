@@ -50,8 +50,8 @@ function show_logo() {
 ╚═════╝░╚═════╝░╚═╝░░╚═╝╚═╝░░╚══╝░╚════╝░░╚════╝░╚═╝░╚════╝░░╚════╝░╚═╝░░░░░╚═╝
 
 EOF
-if [ -n "$*" ] ; then
-  echo -e "$*"
-fi
-
+  if [ -n "$*" ] ; then
+    echo -ne "$*"
+  fi
+  echo -e "Alpine release: $(cat /etc/alpine-release)\n"
 }

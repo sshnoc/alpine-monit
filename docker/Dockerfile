@@ -1,5 +1,6 @@
 # https://hangarau.space/using-supervisord-as-the-init-process-of-a-docker-container/
-FROM alpine:3.18 AS builder
+# FROM alpine:3.18 AS builder
+FROM alpine:edge AS builder
 
 RUN mkdir /usr/local/src && \
     apk update && apk upgrade && \
@@ -8,7 +9,8 @@ WORKDIR /usr/local/src
 RUN git clone https://github.com/dennypage/dpinger.git
 RUN cd dpinger && make
 
-FROM alpine:3.18
+# FROM alpine:3.18
+FROM alpine:edge
 LABEL maintainer="sshnoc.com"
 
 ARG TARGETPLATFORM
